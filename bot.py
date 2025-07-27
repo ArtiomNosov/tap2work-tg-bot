@@ -9,6 +9,7 @@ from datetime import datetime
 from rate_limit import RateLimitMiddleware
 from collections import defaultdict
 from typing import DefaultDict
+from collections import deque
 
 
 # Загрузка токена из config.ini
@@ -18,7 +19,10 @@ TOKEN = config['bot']['token']
 ADMIN_CHAT_ID = int(config['bot']['admin_id'])
 SPAM_WARNING_LIMIT = int(config['bot'].get('spam_warning_limit', 20))
 SPAM_BLOCK_LIMIT = int(config['bot'].get('spam_block_limit', 200))
-SPAM_INTERVAL_SECONDS = int(config['bot'].get('SPAM_INTERVAL_SECONDS', 3))
+SPAM_INTERVAL_SECONDS = int(config['bot'].get('spam_interval_seconds', 3))
+SUPPORT_REQUEST_LIMIT = int(config['bot'].get('support_request_limit', 5))
+SUPPORT_REQUEST_INTERVAL = 3600  # 1 час (в секундах)
+BLACKLIST = set(map(int, config['bot'].get('blacklist', '').split(',')))
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -26,7 +30,8 @@ dp.middleware.setup(RateLimitMiddleware(
     interval_seconds=SPAM_INTERVAL_SECONDS,
     warning_limit=SPAM_WARNING_LIMIT,
     block_limit=SPAM_BLOCK_LIMIT,
-    admin_chat_id=ADMIN_CHAT_ID
+    admin_chat_id=ADMIN_CHAT_ID,
+    blacklist=BLACKLIST
 ))
 
 
@@ -55,6 +60,7 @@ user_daily_counts: DefaultDict[int, dict[str, object]] = defaultdict(
     lambda: {"count": 0, "last_seen": datetime.now()}
 )
 blocked_users = set()
+support_requests = defaultdict(lambda: deque())  # user_id -> deque of datetimes
 
 # Приветственное сообщение
 WELCOME_MESSAGE = (
@@ -79,6 +85,24 @@ async def return_to_start(message: types.Message, state: FSMContext):
 
 @dp.message_handler(lambda message: message.text == "🛠 Поддержка")
 async def start_support(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    now = datetime.now()
+    requests = support_requests[user_id]
+
+    # Удаляем устаревшие обращения
+    while requests and (now - requests[0]).total_seconds() > SUPPORT_REQUEST_INTERVAL:
+        requests.popleft()
+
+    if len(requests) >= SUPPORT_REQUEST_LIMIT:
+        await message.reply(
+            f"⚠️ Вы уже обращались в поддержку {SUPPORT_REQUEST_LIMIT} раз за последний час. "
+            "Пожалуйста, подождите немного перед следующим запросом."
+        )
+        return
+
+    # Добавляем текущее обращение
+    requests.append(now)
+
     await state.set_state(SupportStates.collecting_messages)
     await state.update_data(messages=[])
     await message.reply(
@@ -87,6 +111,7 @@ async def start_support(message: types.Message, state: FSMContext):
         reply_markup=support_keyboard,
         parse_mode="Markdown"
     )
+
 
 @dp.message_handler(state=SupportStates.collecting_messages, content_types=types.ContentTypes.ANY)
 async def collect_support_message(message: types.Message, state: FSMContext):

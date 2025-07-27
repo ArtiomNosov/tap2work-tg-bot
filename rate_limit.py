@@ -4,7 +4,7 @@ from datetime import datetime
 from collections import defaultdict
 
 class RateLimitMiddleware(BaseMiddleware):
-    def __init__(self, interval_seconds=3, warning_limit=20, block_limit=200, admin_chat_id=None):
+    def __init__(self, interval_seconds=3, warning_limit=20, block_limit=200, admin_chat_id=None, blacklist=None):
         super().__init__()
         self.interval = interval_seconds
         self.admin_chat_id = admin_chat_id
@@ -13,6 +13,7 @@ class RateLimitMiddleware(BaseMiddleware):
         self.user_last_time = {}
         self.user_daily_counts = defaultdict(lambda: {"count": 0, "last_seen": datetime.now()})
         self.blocked_users = set()
+        self.blacklist = blacklist or set()
 
     async def on_pre_process_message(self, message: types.Message, data: dict):
         user_id = message.from_user.id
@@ -21,6 +22,9 @@ class RateLimitMiddleware(BaseMiddleware):
         # Блокировка
         if user_id in self.blocked_users:
             raise Exception("User blocked")
+        
+        if user_id in self.blacklist:
+            raise Exception("User is in static blacklist")
 
         # Проверка частоты
         last_time = self.user_last_time.get(user_id)
