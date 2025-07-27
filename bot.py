@@ -22,7 +22,8 @@ SPAM_BLOCK_LIMIT = int(config['bot'].get('spam_block_limit', 200))
 SPAM_INTERVAL_SECONDS = int(config['bot'].get('spam_interval_seconds', 3))
 SUPPORT_REQUEST_LIMIT = int(config['bot'].get('support_request_limit', 5))
 SUPPORT_REQUEST_INTERVAL = 3600  # 1 час (в секундах)
-BLACKLIST = set(map(int, config['bot'].get('blacklist', '').split(',')))
+BLACKLIST = set(map(int, config['bot'].get('blacklist', '').split(','))) if config['bot'].get('blacklist') else set()
+FORBIDDEN_WORDS = set(w.strip().lower() for w in config['bot'].get('forbidden_words', '').split(',') if w.strip())
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -31,7 +32,7 @@ dp.middleware.setup(RateLimitMiddleware(
     warning_limit=SPAM_WARNING_LIMIT,
     block_limit=SPAM_BLOCK_LIMIT,
     admin_chat_id=ADMIN_CHAT_ID,
-    blacklist=BLACKLIST
+    blacklist=BLACKLIST  # ссылка, а не копия
 ))
 
 
@@ -202,8 +203,17 @@ async def fallback_handler(message: types.Message):
 
 
 async def process_message(message: types.Message):
-    # Сюда можно вставить прежнюю логику из handle_unexpected_message
+    user_id = message.from_user.id
     username = message.from_user.username or message.from_user.full_name
+
+    if message.text:
+        lowered = message.text.lower()
+        if any(word in lowered for word in FORBIDDEN_WORDS):
+            BLACKLIST.add(user_id)
+            await message.reply("⛔️ Вы использовали запрещённые слова. Доступ к боту ограничен.")
+            await bot.send_message(ADMIN_CHAT_ID, f"🚫 Пользователь @{username} добавлен в чёрный список за сообщение:\n\n{message.text}")
+            return
+
 
     if message.text:
         await bot.send_message(ADMIN_CHAT_ID, f"📥 Сообщение от @{username}:\n\n{message.text}")
