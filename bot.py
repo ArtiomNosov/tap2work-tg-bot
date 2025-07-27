@@ -5,6 +5,10 @@ from aiogram.utils import executor
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from datetime import datetime
+from rate_limit import RateLimitMiddleware
+from collections import defaultdict
+from typing import DefaultDict
 
 
 # Загрузка токена из config.ini
@@ -12,9 +16,19 @@ config = configparser.ConfigParser()
 config.read('config_my.ini')
 TOKEN = config['bot']['token']
 ADMIN_CHAT_ID = int(config['bot']['admin_id'])
+SPAM_WARNING_LIMIT = int(config['bot'].get('spam_warning_limit', 20))
+SPAM_BLOCK_LIMIT = int(config['bot'].get('spam_block_limit', 200))
+SPAM_INTERVAL_SECONDS = int(config['bot'].get('SPAM_INTERVAL_SECONDS', 3))
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
+dp.middleware.setup(RateLimitMiddleware(
+    interval_seconds=SPAM_INTERVAL_SECONDS,
+    warning_limit=SPAM_WARNING_LIMIT,
+    block_limit=SPAM_BLOCK_LIMIT,
+    admin_chat_id=ADMIN_CHAT_ID
+))
+
 
 class JobSearchStates(StatesGroup):
     waiting_for_vacancy_link = State()
@@ -36,6 +50,11 @@ keyboard.add(
 support_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 support_keyboard.add(KeyboardButton("✅ Отправить сообщение"))
 support_keyboard.add(KeyboardButton("🔙 Вернуться в начало"))
+
+user_daily_counts: DefaultDict[int, dict[str, object]] = defaultdict(
+    lambda: {"count": 0, "last_seen": datetime.now()}
+)
+blocked_users = set()
 
 # Приветственное сообщение
 WELCOME_MESSAGE = (
@@ -152,11 +171,15 @@ async def handle_text_resume(message: types.Message, state: FSMContext):
     await prompt_to_continue(message)
     await state.finish()
 
-@dp.message_handler(content_types=types.ContentTypes.ANY, state=None)
-async def handle_unexpected_message(message: types.Message):
+@dp.message_handler(content_types=types.ContentTypes.ANY)
+async def fallback_handler(message: types.Message):
+    await process_message(message)
+
+
+async def process_message(message: types.Message):
+    # Сюда можно вставить прежнюю логику из handle_unexpected_message
     username = message.from_user.username or message.from_user.full_name
 
-    # Отправляем админу сообщение
     if message.text:
         await bot.send_message(ADMIN_CHAT_ID, f"📥 Сообщение от @{username}:\n\n{message.text}")
     elif message.document:
@@ -166,9 +189,7 @@ async def handle_unexpected_message(message: types.Message):
     else:
         await bot.send_message(ADMIN_CHAT_ID, f"📥 Неподдерживаемый тип сообщения от @{username}")
 
-    # Ответ пользователю
     await message.reply("Спасибо за сообщение! Если у тебя есть вопрос — мы его обязательно рассмотрим 👌")
-
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
