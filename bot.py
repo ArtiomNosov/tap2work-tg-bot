@@ -10,6 +10,7 @@ from rate_limit import RateLimitMiddleware
 from collections import defaultdict
 from typing import DefaultDict
 from collections import deque
+from logger import log_action, init_log_db
 
 
 # Загрузка токена из config.ini
@@ -34,6 +35,8 @@ dp.middleware.setup(RateLimitMiddleware(
     admin_chat_id=ADMIN_CHAT_ID,
     blacklist=BLACKLIST  # ссылка, а не копия
 ))
+
+init_log_db()
 
 
 class JobSearchStates(StatesGroup):
@@ -77,10 +80,12 @@ WELCOME_MESSAGE = (
 
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
+    log_action(message.from_user.id, message.from_user.username or message.from_user.full_name, "start_command")
     await message.reply(WELCOME_MESSAGE, reply_markup=keyboard, parse_mode="Markdown")
 
 @dp.message_handler(lambda message: message.text == "🔙 Вернуться в начало", state="*")
 async def return_to_start(message: types.Message, state: FSMContext):
+    log_action(message.from_user.id, message.from_user.username or message.from_user.full_name, "return_to_start")
     await state.finish()
     await message.reply(WELCOME_MESSAGE, reply_markup=keyboard)
 
@@ -89,6 +94,8 @@ async def start_support(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     now = datetime.now()
     requests = support_requests[user_id]
+
+    log_action(user_id, message.from_user.username or message.from_user.full_name, "support_request")
 
     # Удаляем устаревшие обращения
     while requests and (now - requests[0]).total_seconds() > SUPPORT_REQUEST_INTERVAL:
@@ -116,6 +123,8 @@ async def start_support(message: types.Message, state: FSMContext):
 
 @dp.message_handler(state=SupportStates.collecting_messages, content_types=types.ContentTypes.ANY)
 async def collect_support_message(message: types.Message, state: FSMContext):
+    log_action(message.from_user.id, message.from_user.username or message.from_user.full_name, "collect_support_message")
+
     if message.text and message.text.strip().lower() in {"отправить", "✅ отправить сообщение"}:
         data = await state.get_data()
         messages = data.get("messages", [])
@@ -141,6 +150,8 @@ async def collect_support_message(message: types.Message, state: FSMContext):
 
 @dp.message_handler(lambda message: message.text == "🔹 Хочу получить рекомендацию")
 async def handle_recommendation_request(message: types.Message):
+    log_action(message.from_user.id, message.from_user.username or message.from_user.full_name, "handle_recommendation_request")
+
     await message.reply(
     "Отлично! Пришли вакансию, которая тебя интересует — это может быть ссылка, профессия, описание или просто направление. "
     "Главное, чтобы было понятно, куда ты хочешь попасть 🙂"
@@ -149,6 +160,8 @@ async def handle_recommendation_request(message: types.Message):
 
 @dp.message_handler(state=JobSearchStates.waiting_for_vacancy_link, content_types=types.ContentType.TEXT)
 async def collect_vacancy_description(message: types.Message, state: FSMContext):
+    log_action(message.from_user.id, message.from_user.username or message.from_user.full_name, "collect_vacancy_description")
+
     vacancy_info = message.text.strip()
     await state.update_data(vacancy_url=vacancy_info)
 
@@ -164,6 +177,8 @@ async def collect_vacancy_description(message: types.Message, state: FSMContext)
 async def handle_candidate_offer(message: types.Message):
     username = message.from_user.username or message.from_user.full_name
 
+    log_action(message.from_user.id, username, "handle_candidate_offer")
+
     await bot.send_message(
         ADMIN_CHAT_ID,
         f"👤 @{username} хочет рекомендовать кандидатов."
@@ -173,6 +188,7 @@ async def handle_candidate_offer(message: types.Message):
     await prompt_to_continue(message)
 
 async def prompt_to_continue(message: types.Message):
+    log_action(message.from_user.id, message.from_user.username or message.from_user.full_name, "prompt_to_continue")
     await message.reply(
         "📌 Ты можешь в любое удобное время вернуться и выбрать, чем хочешь помочь или в чём нуждаешься 👇",
         reply_markup=keyboard
@@ -184,6 +200,7 @@ async def handle_text_resume(message: types.Message, state: FSMContext):
     vacancy_url = data.get("vacancy_url")
     resume_text = message.text.strip()
     username = message.from_user.username or message.from_user.full_name
+    log_action(message.from_user.id, username, "handle_text_resume")
 
     admin_message = (
         f"📩 Заявка на рекомендацию от @{username}:\n\n"
@@ -205,6 +222,10 @@ async def fallback_handler(message: types.Message):
 async def process_message(message: types.Message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.full_name
+    content_type = message.content_type
+    message_text = message.text if message.text else ""
+
+    log_action(user_id, username, "message", message_text, str(content_type))
 
     if message.text:
         lowered = message.text.lower()
