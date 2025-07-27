@@ -124,7 +124,7 @@ async def handle_candidate_offer(message: types.Message):
         f"👤 @{username} хочет рекомендовать кандидатов."
     )
 
-    await message.reply("Спасибо! Мы свяжемся с тобой в течение 24 часов 🙌")
+    await message.reply("Спасибо! Мы свяжемся с тобой в течение 24 часов для помощи подбора кандидатов 🙌")
     await prompt_to_continue(message)
 
 async def prompt_to_continue(message: types.Message):
@@ -148,7 +148,7 @@ async def handle_text_resume(message: types.Message, state: FSMContext):
 
     await bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_message)
 
-    await message.reply("Спасибо! Мы передали твоё мини-резюме. С тобой свяжутся в течении 24 часов.")
+    await message.reply("Спасибо! Мы передали твоё мини-резюме. С тобой свяжутся в течении 24 часов, чтобы дать рекомендацию.")
     await prompt_to_continue(message)
     await state.finish()
 
